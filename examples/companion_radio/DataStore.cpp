@@ -163,6 +163,23 @@ bool DataStore::removeFile(FILESYSTEM* fs, const char* filename) {
   return fs->remove(filename);
 }
 
+int DataStore::readSmallFile(const char* filename, uint8_t dest[], int max_len) {
+  if (!_fs->exists(filename)) return 0;
+  File file = openRead(_fs, filename);
+  if (!file) return 0;
+  int n = file.read(dest, max_len);
+  file.close();
+  return n < 0 ? 0 : n;
+}
+
+bool DataStore::writeSmallFile(const char* filename, const uint8_t src[], int len) {
+  File file = openWrite(_fs, filename);
+  if (!file) return false;
+  bool ok = file.write(src, len) == (size_t)len;
+  file.close();
+  return ok;
+}
+
 bool DataStore::formatFileSystem() {
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   if (_fsExtra == nullptr) {

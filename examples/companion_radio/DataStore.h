@@ -47,6 +47,8 @@ public:
   File openRead(FILESYSTEM* fs, const char* filename);
   bool removeFile(const char* filename);
   bool removeFile(FILESYSTEM* fs, const char* filename);
+  int  readSmallFile(const char* filename, uint8_t dest[], int max_len);   // primary FS, returns bytes read (0 if missing)
+  bool writeSmallFile(const char* filename, const uint8_t src[], int len);
   uint32_t getStorageUsedKb() const;
   uint32_t getStorageTotalKb() const;
 

@@ -22,6 +22,23 @@
 #include "../AbstractUITask.h"
 #include "../NodePrefs.h"
 
+#ifdef UI_QUICK_COMMANDS
+  #include "QuickCommands.h"
+#endif
+
+#ifdef UI_DEVICE_CONFIG
+  #define UI_AUDIO_FILE       "/ui_audio"
+  #define UI_AUDIO_FILE_VER   1
+  #define UI_CHANNEL_KEY_LEN  6     // channels are identified by a prefix of their secret
+
+  struct UIAudioPrefs {
+    uint8_t beep_channels;   // beep on channel messages
+    uint8_t beep_private;    // beep on direct messages
+    uint8_t n_muted;         // channels excluded from the channel beep
+    uint8_t muted[MAX_GROUP_CHANNELS][UI_CHANNEL_KEY_LEN];
+  };
+#endif
+
 class UITask : public AbstractUITask {
   DisplayDriver* _display;
   SensorManager* _sensors;
@@ -52,6 +69,29 @@ class UITask : public AbstractUITask {
   UIScreen* home;
   UIScreen* msg_preview;
   UIScreen* curr;
+#ifdef UI_QUICK_COMMANDS
+  UIScreen* quick_cmd;      // send list
+  UIScreen* quick_config;   // list of slots
+  UIScreen* quick_slot;     // edit one slot
+  UIScreen* quick_dest;     // pick recipients of a slot
+  UIScreen* quick_text;     // on-screen keyboard for the text of a slot
+  QuickCmdSlot _qc[UI_QUICK_MAX_CMDS];
+  bool _qc_loaded;
+
+  void beginQuickCommands();
+  void loadQuickCmds();
+#endif
+#ifdef UI_DEVICE_CONFIG
+  UIScreen* device_cfg;     // sections
+  UIScreen* audio_cfg;      // audio settings
+  UIScreen* channel_beep;   // per-channel beep selection
+  UIAudioPrefs _audio;
+  bool _audio_loaded;
+
+  void beginDeviceConfig();
+  void loadAudioPrefs();
+  bool isChannelMuted(const uint8_t* secret);
+#endif
 
   void userLedHandler();
 
@@ -69,6 +109,14 @@ public:
     next_batt_chck = _next_refresh = 0;
     ui_started_at = 0;
     curr = NULL;
+#ifdef UI_QUICK_COMMANDS
+    quick_cmd = quick_config = quick_slot = quick_dest = quick_text = NULL;
+    _qc_loaded = false;
+#endif
+#ifdef UI_DEVICE_CONFIG
+    device_cfg = audio_cfg = channel_beep = NULL;
+    _audio_loaded = false;
+#endif
   }
   void begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs);
 
@@ -89,6 +137,34 @@ public:
   void toggleBuzzer();
   bool getGPSState();
   void toggleGPS();
+
+#ifdef UI_QUICK_COMMANDS
+  void gotoQuickCmdScreen(bool reset = true);
+  void gotoQuickConfigScreen(bool reset = true);
+  void gotoQuickSlotScreen(int slot, bool reset = true);
+  void gotoQuickDestScreen(int slot);
+  void gotoQuickTextScreen(int slot);
+
+  QuickCmdSlot* getQuickCmd(int slot);
+  int  getQuickCmdCount();                                      // slots with a text
+  void saveQuickCmds();
+  bool isQuickRecipient(int slot, const uint8_t* pub_key);
+  int  toggleQuickRecipient(int slot, const uint8_t* pub_key);  // 1 = added, 0 = removed, -1 = list full
+  int  sendQuickCommand(int slot);                              // returns number of messages queued
+  void onUIMsgAck(const char* contact_name) override;
+#endif
+
+#ifdef UI_DEVICE_CONFIG
+  void gotoDeviceConfigScreen(bool reset = true);
+  void gotoAudioConfigScreen(bool reset = true);
+  void gotoChannelBeepScreen();
+
+  UIAudioPrefs* getAudioPrefs();
+  void saveAudioPrefs();
+  bool isChannelBeepOn(int channel_idx);
+  void toggleChannelBeep(int channel_idx);
+  void notifyChannelMsg(uint8_t channel_idx) override;
+#endif
 
 
   // from AbstractUITask

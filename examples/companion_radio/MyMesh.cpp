@@ -426,7 +426,31 @@ ContactInfo*  MyMesh::processAck(const uint8_t *data) {
       return expected_ack_table[i].contact;
     }
   }
+  for (int i = 0; i < UI_ACK_TABLE_SIZE; i++) {
+    if (ui_ack_table[i].ack != 0 && memcmp(data, &ui_ack_table[i].ack, 4) == 0) { // ACK for a UI-sent message
+      ui_ack_table[i].ack = 0;
+      ContactInfo* contact = ui_ack_table[i].contact;
+      if (_ui && contact) _ui->onUIMsgAck(contact->name);
+      return contact;
+    }
+  }
   return checkConnectionsAck(data);
+}
+
+int MyMesh::sendTextFromUI(const uint8_t* pub_key, int prefix_len, const char* text) {
+  ContactInfo* recipient = lookupContactByPubKey(pub_key, prefix_len);
+  if (recipient == NULL) return MSG_SEND_FAILED;
+
+  uint32_t expected_ack, est_timeout;
+  uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+  int result = sendMessage(*recipient, timestamp, 0, text, expected_ack, est_timeout);
+  if (result != MSG_SEND_FAILED && expected_ack) {
+    ui_ack_table[next_ui_ack_idx].msg_sent = _ms->getMillis();
+    ui_ack_table[next_ui_ack_idx].ack = expected_ack;
+    ui_ack_table[next_ui_ack_idx].contact = recipient;
+    next_ui_ack_idx = (next_ui_ack_idx + 1) % UI_ACK_TABLE_SIZE;
+  }
+  return result;
 }
 
 void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packet *pkt,
@@ -575,7 +599,7 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
     _serial->writeFrame(frame, 1);
   } else {
 #ifdef DISPLAY_CLASS
-    if (_ui) _ui->notify(UIEventType::channelMessage);
+    if (_ui) _ui->notifyChannelMsg(channel_idx);
 #endif
   }
 #ifdef DISPLAY_CLASS
@@ -869,6 +893,8 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
   app_target_ver = 0;
   clearPendingReqs();
   next_ack_idx = 0;
+  next_ui_ack_idx = 0;
+  memset(ui_ack_table, 0, sizeof(ui_ack_table));
   sign_data = NULL;
   dirty_contacts_expiry = 0;
   memset(advert_paths, 0, sizeof(advert_paths));

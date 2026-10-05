@@ -87,6 +87,9 @@ public:
 class HomeScreen : public UIScreen {
   enum HomePage {
     FIRST,
+#ifdef UI_QUICK_COMMANDS
+    QUICK_CMD,
+#endif
     RECENT,
     RADIO,
     BLUETOOTH,
@@ -96,6 +99,9 @@ class HomeScreen : public UIScreen {
 #endif
 #if UI_SENSORS_PAGE == 1
     SENSORS,
+#endif
+#ifdef UI_DEVICE_CONFIG
+    DEVICE_CFG,
 #endif
     SHUTDOWN,
     Count    // keep as last
@@ -242,6 +248,17 @@ public:
         sprintf(tmp, "Pin:%d", the_mesh.getBLEPin());
         display.drawTextCentered(display.width() / 2, 43, tmp);
       }
+#ifdef UI_QUICK_COMMANDS
+    } else if (_page == HomePage::QUICK_CMD) {
+      display.setColor(UIColor::primary_txt);
+      display.setTextSize(2);
+      display.drawTextCentered(display.width() / 2, 20, "COMANDI");
+      display.setTextSize(1);
+      display.setColor(UIColor::secondary_txt);
+      sprintf(tmp, "Comandi pronti: %d", _task->getQuickCmdCount());
+      display.drawTextCentered(display.width() / 2, 40, tmp);
+      display.drawTextCentered(display.width() / 2, 64 - 11, "apri: " PRESS_LABEL);
+#endif
     } else if (_page == HomePage::RECENT) {
       the_mesh.getRecentlyHeard(recent, UI_RECENT_LIST_SIZE);
       display.setColor(UIColor::primary_txt);
@@ -421,6 +438,16 @@ public:
       if (sensors_scroll) sensors_scroll_offset = (sensors_scroll_offset+1)%sensors_nb;
       else sensors_scroll_offset = 0;
 #endif
+#ifdef UI_DEVICE_CONFIG
+    } else if (_page == HomePage::DEVICE_CFG) {
+      display.setColor(UIColor::primary_txt);
+      display.setTextSize(2);
+      display.drawTextCentered(display.width() / 2, 20, "L1 CONFIG");
+      display.setTextSize(1);
+      display.setColor(UIColor::secondary_txt);
+      display.drawTextCentered(display.width() / 2, 40, "audio");
+      display.drawTextCentered(display.width() / 2, 64 - 11, "apri: " PRESS_LABEL);
+#endif
     } else if (_page == HomePage::SHUTDOWN) {
       display.setColor(UIColor::corp_blue);
       display.setTextSize(1);
@@ -448,6 +475,12 @@ public:
       }
       return true;
     }
+#ifdef UI_QUICK_COMMANDS
+    if (c == KEY_ENTER && _page == HomePage::QUICK_CMD) {
+      _task->gotoQuickCmdScreen();
+      return true;
+    }
+#endif
     if (c == KEY_ENTER && _page == HomePage::BLUETOOTH) {
       if (_task->isBluetoothEnabled()) {  // toggle Bluetooth on/off
         _task->disableBluetooth();
@@ -478,6 +511,12 @@ public:
       return true;
     }
 #endif
+#ifdef UI_DEVICE_CONFIG
+    if (c == KEY_ENTER && _page == HomePage::DEVICE_CFG) {
+      _task->gotoDeviceConfigScreen();
+      return true;
+    }
+#endif
     if (c == KEY_ENTER && _page == HomePage::SHUTDOWN) {
       _shutdown_init = true;  // need to wait for button to be released
       return true;
@@ -486,46 +525,149 @@ public:
   }
 };
 
+// Converts UTF-8 text to plain printable ASCII for the small display font:
+// accented letters lose the accent (Italian style: "citta" with accent -> "citta'"), typographic
+// quotes/dashes become their ASCII equivalent, anything else (emoji, symbols) is dropped.
+static void toPlainAscii(char* dest, const char* src, size_t dest_size) {
+  // U+00C0..U+00FF -> base letter
+  static const char latin1[] = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPs" "aaaaaaaceeeeiiiidnooooo/ouuuuypy";
+  size_t j = 0;
+  const unsigned char* s = (const unsigned char*) src;
+  while (*s && j < dest_size - 1) {
+    uint32_t cp;
+    int n;
+    if (*s < 0x80)                { cp = *s;        n = 1; }
+    else if ((*s & 0xE0) == 0xC0) { cp = *s & 0x1F; n = 2; }
+    else if ((*s & 0xF0) == 0xE0) { cp = *s & 0x0F; n = 3; }
+    else if ((*s & 0xF8) == 0xF0) { cp = *s & 0x07; n = 4; }
+    else { s++; continue; }   // stray continuation byte
+    int k = 1;
+    for (; k < n && (s[k] & 0xC0) == 0x80; k++) cp = (cp << 6) | (s[k] & 0x3F);
+    s += k;
+    if (k < n) continue;      // truncated sequence
+
+    char out[4] = { 0 };
+    if (cp >= 32 && cp < 127) {
+      out[0] = (char) cp;
+    } else if (cp == '\n' || cp == '\r' || cp == '\t' || cp == 0xA0) {
+      out[0] = ' ';
+    } else if (cp >= 0xC0 && cp <= 0xFF) {
+      out[0] = latin1[cp - 0xC0];
+      // accented vowels typical of Italian: add an apostrophe
+      if (strchr("\xC0\xC8\xC9\xCC\xD2\xD9\xE0\xE8\xE9\xEC\xF2\xF9", (int) cp)) out[1] = '\'';
+    } else if (cp == 0x2018 || cp == 0x2019 || cp == 0x00B4) {
+      out[0] = '\'';
+    } else if (cp == 0x201C || cp == 0x201D || cp == 0x00AB || cp == 0x00BB) {
+      out[0] = '"';
+    } else if (cp == 0x2013 || cp == 0x2014) {
+      out[0] = '-';
+    } else if (cp == 0x2026) {
+      strcpy(out, "...");
+    } else if (cp == 0x20AC) {
+      strcpy(out, "EUR");
+    } else if (cp == 0x00B0) {
+      out[0] = 'o';
+    }
+    for (int i = 0; out[i] && j < dest_size - 1; i++) {
+      if (out[i] == ' ' && (j == 0 || dest[j - 1] == ' ')) continue;   // no leading/double spaces
+      dest[j++] = out[i];
+    }
+  }
+  while (j > 0 && dest[j - 1] == ' ') j--;   // no trailing space
+  dest[j] = 0;
+}
+
+// Splits text into lines of at most 'width' chars, breaking at spaces when possible.
+static int wrapText(const char* text, char lines[][24], int max_lines, int width) {
+  int n = 0;
+  const char* p = text;
+  while (*p && n < max_lines) {
+    while (*p == ' ') p++;
+    if (!*p) break;
+    int len = strlen(p);
+    int take = len;
+    if (len > width) {
+      take = width;   // hard break if a single word is longer than the line
+      for (int i = width; i > 0; i--) {
+        if (p[i] == ' ') { take = i; break; }
+      }
+    }
+    memcpy(lines[n], p, take);
+    lines[n][take] = 0;
+    n++;
+    p += take;
+  }
+  return n;
+}
+
+// Received messages: newest first.
+//   up/down = scroll the text, right = next (older) message, left = previous (newer) one;
+//   going past the first/last message, or pressing Enter/back, closes the preview.
 class MsgPreviewScreen : public UIScreen {
   UITask* _task;
   mesh::RTCClock* _rtc;
 
   struct MsgEntry {
     uint32_t timestamp;
-    char origin[62];
-    char msg[78];
+    char origin[48];
+    char msg[168];
   };
   #define MAX_UNREAD_MSGS   32
+  #define MSG_MAX_LINES     12
+  #define MSG_LINE_CHARS    20      // leaves room for the scroll bar on a 128px display
+  #define MSG_VISIBLE_LINES  4
   int num_unread;
   int head = MAX_UNREAD_MSGS - 1; // index of latest unread message
   MsgEntry unread[MAX_UNREAD_MSGS];
+  int _pos;      // 0 = newest
+  int _scroll;   // first visible line
+  int _nlines;   // lines of the current message (from last render)
+
+  MsgEntry* entryAt(int pos) { return &unread[(head - pos + MAX_UNREAD_MSGS) % MAX_UNREAD_MSGS]; }
+
+  void close() {
+    num_unread = 0;  // clear unread queue
+    _pos = _scroll = 0;
+    _task->gotoHomeScreen();
+  }
 
 public:
-  MsgPreviewScreen(UITask* task, mesh::RTCClock* rtc) : _task(task), _rtc(rtc) { num_unread = 0; }
+  MsgPreviewScreen(UITask* task, mesh::RTCClock* rtc) : _task(task), _rtc(rtc) {
+    num_unread = 0;
+    _pos = _scroll = _nlines = 0;
+  }
 
   void addPreview(uint8_t path_len, const char* from_name, const char* msg) {
     head = (head + 1) % MAX_UNREAD_MSGS;
     if (num_unread < MAX_UNREAD_MSGS) num_unread++;
+    _pos = _scroll = 0;   // jump to the new message
 
     auto p = &unread[head];
     p->timestamp = _rtc->getCurrentTime();
+    char name[32];
+    toPlainAscii(name, from_name, sizeof(name));
     if (path_len == 0xFF) {
-      sprintf(p->origin, "(D) %s:", from_name);
+      snprintf(p->origin, sizeof(p->origin), "(D) %s:", name);
     } else {
-      sprintf(p->origin, "(%d) %s:", (uint32_t) path_len, from_name);
+      snprintf(p->origin, sizeof(p->origin), "(%d) %s:", (uint32_t) path_len, name);
     }
-    StrHelper::strncpy(p->msg, msg, sizeof(p->msg));
+    toPlainAscii(p->msg, msg, sizeof(p->msg));
   }
 
   int render(DisplayDriver& display) override {
+    if (num_unread == 0) {
+      _task->gotoHomeScreen();
+      return 100;
+    }
+    if (_pos >= num_unread) _pos = num_unread - 1;
+    auto p = entryAt(_pos);
+
     char tmp[16];
-    display.setCursor(0, 0);
     display.setTextSize(1);
     display.setColor(UIColor::corp_blue);
-    sprintf(tmp, "Unread: %d", num_unread);
+    display.setCursor(0, 0);
+    sprintf(tmp, "Msg %d/%d", _pos + 1, num_unread);
     display.print(tmp);
-
-    auto p = &unread[head];
 
     int secs = _rtc->getCurrentTime() - p->timestamp;
     if (secs < 60) {
@@ -540,17 +682,27 @@ public:
 
     display.drawRect(0, 11, display.width(), 1);  // horiz line
 
-    display.setCursor(0, 14);
     display.setColor(UIColor::secondary_txt);
-    char filtered_origin[sizeof(p->origin)];
-    display.translateUTF8ToBlocks(filtered_origin, p->origin, sizeof(filtered_origin));
-    display.print(filtered_origin);
+    display.drawTextEllipsized(0, 14, display.width(), p->origin);
 
-    display.setCursor(0, 25);
+    char lines[MSG_MAX_LINES][24];
+    _nlines = wrapText(p->msg, lines, MSG_MAX_LINES, MSG_LINE_CHARS);
+    int max_scroll = _nlines > MSG_VISIBLE_LINES ? _nlines - MSG_VISIBLE_LINES : 0;
+    if (_scroll > max_scroll) _scroll = max_scroll;
+
     display.setColor(UIColor::primary_txt);
-    char filtered_msg[sizeof(p->msg)];
-    display.translateUTF8ToBlocks(filtered_msg, p->msg, sizeof(filtered_msg));
-    display.printWordWrap(filtered_msg, display.width());
+    int y = 25;
+    for (int i = _scroll; i < _nlines && i < _scroll + MSG_VISIBLE_LINES; i++, y += 10) {
+      display.setCursor(0, y);
+      display.print(lines[i]);
+    }
+
+    if (_nlines > MSG_VISIBLE_LINES) {   // scroll bar
+      const int top = 25, h = display.height() - top;
+      int bar_h = h * MSG_VISIBLE_LINES / _nlines;
+      int bar_y = top + h * _scroll / _nlines;
+      display.fillRect(display.width() - 2, bar_y, 2, bar_h);
+    }
 
 #if AUTO_OFF_MILLIS==0 // probably e-ink
     return 10000; // 10 s
@@ -560,18 +712,35 @@ public:
   }
 
   bool handleInput(char c) override {
-    if (c == KEY_NEXT || c == KEY_RIGHT) {
-      head = (head + MAX_UNREAD_MSGS - 1) % MAX_UNREAD_MSGS;
-      num_unread--;
-      if (num_unread == 0) {
-        _task->gotoHomeScreen();
-      }
-      return true;
-    }
-    if (c == KEY_ENTER) {
-      num_unread = 0;  // clear unread queue
-      _task->gotoHomeScreen();
-      return true;
+    switch (c) {
+      case KEY_UP:
+        if (_scroll > 0) _scroll--;
+        return true;
+      case KEY_DOWN:
+        if (_scroll < _nlines - MSG_VISIBLE_LINES) _scroll++;
+        return true;
+      case KEY_RIGHT:
+      case KEY_NEXT:
+        if (_pos + 1 < num_unread) {
+          _pos++;
+          _scroll = 0;
+        } else {
+          close();
+        }
+        return true;
+      case KEY_LEFT:
+      case KEY_PREV:
+        if (_pos > 0) {
+          _pos--;
+          _scroll = 0;
+        } else {
+          close();
+        }
+        return true;
+      case KEY_ENTER:
+      case KEY_CANCEL:
+        close();
+        return true;
     }
     return false;
   }
@@ -611,8 +780,15 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   splash = new SplashScreen(this);
   home = new HomeScreen(this, &rtc_clock, sensors, node_prefs);
   msg_preview = new MsgPreviewScreen(this, &rtc_clock);
+#ifdef UI_QUICK_COMMANDS
+  beginQuickCommands();
+#endif
+#ifdef UI_DEVICE_CONFIG
+  beginDeviceConfig();
+#endif
   setCurrScreen(splash);
 }
+
 
 void UITask::showAlert(const char* text, int duration_millis) {
   strcpy(_alert, text);
@@ -620,6 +796,10 @@ void UITask::showAlert(const char* text, int duration_millis) {
 }
 
 void UITask::notify(UIEventType t) {
+#ifdef UI_DEVICE_CONFIG
+  if (t == UIEventType::contactMessage && !getAudioPrefs()->beep_private) return;
+  if (t == UIEventType::channelMessage && !getAudioPrefs()->beep_channels) return;
+#endif
 #if defined(PIN_BUZZER)
 switch(t){
   case UIEventType::contactMessage:
@@ -757,7 +937,19 @@ void UITask::loop() {
   ev = back_btn.check();
   if (ev == BUTTON_EVENT_TRIPLE_CLICK) {
     c = handleTripleClick(KEY_SELECT);
+  } else if (ev == BUTTON_EVENT_CLICK) {
+    c = checkDisplayOn(KEY_CANCEL);
   }
+#ifdef UI_HAS_JOYSTICK_UPDOWN
+  ev = joystick_up.check();
+  if (ev == BUTTON_EVENT_CLICK) {
+    c = checkDisplayOn(KEY_UP);
+  }
+  ev = joystick_down.check();
+  if (ev == BUTTON_EVENT_CLICK) {
+    c = checkDisplayOn(KEY_DOWN);
+  }
+#endif
 #elif defined(PIN_USER_BTN)
   int ev = user_btn.check();
   if (ev == BUTTON_EVENT_CLICK) {

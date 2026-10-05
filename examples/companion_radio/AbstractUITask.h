@@ -42,5 +42,7 @@ public:
   virtual void msgRead(int msgcount) = 0;
   virtual void newMsg(uint8_t path_len, const char* from_name, const char* text, int msgcount) = 0;
   virtual void notify(UIEventType t = UIEventType::none) = 0;
+  virtual void onUIMsgAck(const char* contact_name) { }   // ACK for a message sent from the device UI
+  virtual void notifyChannelMsg(uint8_t channel_idx) { notify(UIEventType::channelMessage); }
   virtual void loop() = 0;
 };

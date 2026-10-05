@@ -185,6 +185,10 @@ public:
   // To check if there is pending work
   bool hasPendingWork() const;
 
+  // send a plain text message originated from the device UI (not the app)
+  int sendTextFromUI(const uint8_t* pub_key, int prefix_len, const char* text);
+  DataStore* getDataStore() const { return _store; }
+
 private:
   void writeOKFrame();
   void writeErrFrame(uint8_t err_code);
@@ -253,6 +257,10 @@ private:
   #define EXPECTED_ACK_TABLE_SIZE 8
   AckTableEntry expected_ack_table[EXPECTED_ACK_TABLE_SIZE]; // circular table
   int next_ack_idx;
+
+  #define UI_ACK_TABLE_SIZE 8
+  AckTableEntry ui_ack_table[UI_ACK_TABLE_SIZE];  // ACKs for messages sent from the device UI
+  int next_ui_ack_idx;
 
   #define ADVERT_PATH_TABLE_SIZE   16
   AdvertPath advert_paths[ADVERT_PATH_TABLE_SIZE]; // circular table
