@@ -126,3 +126,7 @@ There are a number of fairly major features in the pipeline, with no particular 
 - Report bugs and request features on the [GitHub Issues](https://github.com/ripplebiz/MeshCore/issues) page.
 - Find additional guides and components on [my site](https://buymeacoffee.com/ripplebiz).
 - Join [MeshCore Discord](https://meshcore.gg) to chat with the developers and get help from the community.
+
+---
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/W4M829BGBC)
